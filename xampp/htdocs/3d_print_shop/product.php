@@ -1,198 +1,287 @@
 <?php
-// product.php — страница одного товара + оформление заказа
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 
-// Берём id из адреса: product.php?id=1
-$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$productId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$userId = !empty($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
 
-if ($id <= 0) {
-    echo '<p>Товар не найден.</p>';
-    require_once __DIR__ . '/includes/footer.php';
-    exit;
+if ($productId <= 0) {
+    setFlash('error', t('product.not_found'));
+    redirect('/3d_print_shop/catalog.php');
 }
 
-// --- Загружаем товар из базы ---
-$sql = "
-    SELECT p.id,
-           p.name,
-           p.short_description,
-           p.description,
-           p.price,
-           p.image,
-           c.name AS category_name
+$stmt = $mysqli->prepare("
+    SELECT
+        p.id,
+        p.name,
+        p.name_ru,
+        p.name_en,
+        p.name_et,
+        p.short_description,
+        p.short_description_ru,
+        p.short_description_en,
+        p.short_description_et,
+        p.description,
+        p.description_ru,
+        p.description_en,
+        p.description_et,
+        p.price,
+        p.image_path,
+        p.is_active,
+        c.name AS category_name,
+        c.name_ru AS category_name_ru,
+        c.name_en AS category_name_en,
+        c.name_et AS category_name_et
     FROM products p
-    LEFT JOIN categories c ON p.category_id = c.id
-    WHERE p.id = $id
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE p.id = ? AND p.is_active = 1
     LIMIT 1
-";
+");
+$stmt->bind_param('i', $productId);
+$stmt->execute();
+$product = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-$result = $mysqli->query($sql);
-
-if (!$result) {
-    echo '<p>Ошибка запроса: ' . htmlspecialchars($mysqli->error) . '</p>';
-    require_once __DIR__ . '/includes/footer.php';
-    exit;
+if (!$product) {
+    setFlash('error', t('product.not_found'));
+    redirect('/3d_print_shop/catalog.php');
 }
 
-if ($result->num_rows === 0) {
-    echo '<p>Товар не найден.</p>';
-    require_once __DIR__ . '/includes/footer.php';
-    exit;
+$imagesStmt = $mysqli->prepare("
+    SELECT image_path, is_main
+    FROM product_images
+    WHERE product_id = ?
+    ORDER BY is_main DESC, id ASC
+");
+$imagesStmt->bind_param('i', $productId);
+$imagesStmt->execute();
+$productImages = $imagesStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$imagesStmt->close();
+
+if (!$productImages && !empty($product['image_path'])) {
+    $productImages = [
+        [
+            'image_path' => $product['image_path'],
+            'is_main' => 1,
+        ]
+    ];
 }
 
-$product = $result->fetch_assoc();
+$isWishlisted = false;
+if ($userId > 0) {
+    $stmt = $mysqli->prepare("
+        SELECT id
+        FROM wishlist
+        WHERE user_id = ? AND product_id = ?
+        LIMIT 1
+    ");
+    $stmt->bind_param('ii', $userId, $productId);
+    $stmt->execute();
+    $isWishlisted = (bool)$stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
 
-// --- Обработка формы заказа ---
-$orderErrors = [];
-$orderSuccess = '';
+$errors = [];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_submit'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireLogin();
 
-    if (!isset($_SESSION['user_id'])) {
-        $orderErrors[] = 'Для оформления заказа нужно войти в систему.';
-    } else {
-        $userId = (int)$_SESSION['user_id'];
-        $quantity = (int)($_POST['quantity'] ?? 1);
-        $comment  = trim($_POST['comment'] ?? '');
+    $quantity = isset($_POST['quantity']) ? (int)$_POST['quantity'] : 1;
 
-        if ($quantity <= 0) {
-            $orderErrors[] = 'Количество должно быть больше 0.';
-        }
+    if ($quantity < 1 || $quantity > 100) {
+        $errors[] = t('product.quantity_error');
+    }
 
-        // Берём данные пользователя из таблицы users
-        if (empty($orderErrors)) {
-            $stmtUser = $mysqli->prepare("SELECT name, email, phone FROM users WHERE id = ? LIMIT 1");
-            if ($stmtUser) {
-                $stmtUser->bind_param('i', $userId);
-                $stmtUser->execute();
-                $stmtUser->bind_result($uName, $uEmail, $uPhone);
-                if ($stmtUser->fetch()) {
-                    // Всё ок, есть пользователь
-                } else {
-                    $orderErrors[] = 'Пользователь не найден.';
-                }
-                $stmtUser->close();
-            } else {
-                $orderErrors[] = 'Ошибка подготовки запроса (user): ' . htmlspecialchars($mysqli->error);
-            }
-        }
+    if (!$errors) {
+        $actualUserId = (int)$_SESSION['user_id'];
 
-        // Сохраняем заказ
-        if (empty($orderErrors)) {
-            $stmtOrder = $mysqli->prepare("
-                INSERT INTO orders
-                    (user_id, product_id, customer_name, customer_email, customer_phone, quantity, status, comment)
-                VALUES
-                    (?, ?, ?, ?, ?, ?, 'new', ?)
+        $stmt = $mysqli->prepare("
+            SELECT id, name, email, phone
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->bind_param('i', $actualUserId);
+        $stmt->execute();
+        $user = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$user) {
+            $errors[] = t('login.error');
+        } else {
+            $totalAmount = $quantity * (float)$product['price'];
+
+            $stmt = $mysqli->prepare("
+                INSERT INTO orders (
+                    user_id,
+                    customer_name,
+                    customer_email,
+                    customer_phone,
+                    total_amount,
+                    status,
+                    status_id
+                )
+                VALUES (?, ?, ?, ?, ?, 'new', 1)
             ");
+            $stmt->bind_param(
+                'isssd',
+                $actualUserId,
+                $user['name'],
+                $user['email'],
+                $user['phone'],
+                $totalAmount
+            );
+            $stmt->execute();
+            $orderId = $stmt->insert_id;
+            $stmt->close();
 
-            if ($stmtOrder) {
-                $stmtOrder->bind_param(
-                    'iisssis',
-                    $userId,
-                    $product['id'],
-                    $uName,
-                    $uEmail,
-                    $uPhone,
-                    $quantity,
-                    $comment
-                );
+            $unitPrice = (float)$product['price'];
 
-                if ($stmtOrder->execute()) {
-                    $orderSuccess = 'Заказ успешно оформлен! Мы свяжемся с вами для подтверждения.';
-                } else {
-                    $orderErrors[] = 'Не удалось сохранить заказ: ' . htmlspecialchars($stmtOrder->error);
-                }
+            $stmt = $mysqli->prepare("
+                INSERT INTO order_items (
+                    order_id,
+                    product_id,
+                    quantity,
+                    unit_price
+                )
+                VALUES (?, ?, ?, ?)
+            ");
+            $stmt->bind_param(
+                'iiid',
+                $orderId,
+                $productId,
+                $quantity,
+                $unitPrice
+            );
+            $stmt->execute();
+            $stmt->close();
 
-                $stmtOrder->close();
-            } else {
-                $orderErrors[] = 'Ошибка подготовки запроса (order): ' . htmlspecialchars($mysqli->error);
-            }
+            $stmt = $mysqli->prepare("
+                INSERT INTO order_status_history (order_id, status_id)
+                VALUES (?, 1)
+            ");
+            $stmt->bind_param('i', $orderId);
+            $stmt->execute();
+            $stmt->close();
+
+            require_once __DIR__ . '/mail/mailer.php';
+
+            $mailBody = renderMailTemplate('order_created.php', [
+                'orderId' => $orderId,
+                'customerName' => $user['name'],
+                'customerEmail' => $user['email'],
+                'customerPhone' => $user['phone'],
+                'productName' => tdb($product, 'name'),
+                'quantity' => $quantity,
+                'unitPrice' => $unitPrice,
+                'totalAmount' => $totalAmount,
+                'createdAt' => date('Y-m-d H:i:s'),
+            ]);
+
+            sendMailToAdmin('New product order / Новый заказ товара #' . $orderId, $mailBody);
+
+            setFlash('success', t('product.order_success'));
+            redirect('/3d_print_shop/profile.php');
         }
     }
 }
+
+require_once __DIR__ . '/includes/header.php';
+
+$categoryTitle = tdb([
+    'name_ru' => $product['category_name_ru'] ?? '',
+    'name_en' => $product['category_name_en'] ?? '',
+    'name_et' => $product['category_name_et'] ?? '',
+    'name' => $product['category_name'] ?? '',
+], 'name');
 ?>
 
-<h2><?= htmlspecialchars($product['name']) ?></h2>
-
-<div class="product-detail">
-    <?php if (!empty($product['image'])): ?>
-        <div class="product-detail-image">
-            <img src="uploads/images/<?= htmlspecialchars($product['image']) ?>"
-                 alt="<?= htmlspecialchars($product['name']) ?>">
-        </div>
-    <?php endif; ?>
-
-    <div class="product-detail-info">
-        <p class="product-category">
-            Категория:
-            <?= htmlspecialchars(isset($product['category_name']) ? $product['category_name'] : 'Без категории') ?>
+    <div class="page-header">
+        <h1><?= e(tdb($product, 'name')) ?></h1>
+        <p class="small-text">
+            <?= e(t('common.category')) ?>: <?= e($categoryTitle ?: t('common.none')) ?>
         </p>
-
-        <?php if (!empty($product['short_description'])): ?>
-            <p><strong>Кратко:</strong> <?= htmlspecialchars($product['short_description']) ?></p>
-        <?php endif; ?>
-
-        <?php if (!empty($product['description'])): ?>
-            <p><strong>Описание:</strong><br>
-                <?= nl2br(htmlspecialchars($product['description'])) ?>
-            </p>
-        <?php endif; ?>
-
-        <p class="product-price">
-            Цена: <?= number_format($product['price'], 2, '.', ' ') ?> €
-        </p>
-
-        <div class="product-actions">
-            <?php if (!empty($orderSuccess)): ?>
-                <div class="message success">
-                    <?= htmlspecialchars($orderSuccess) ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if (!empty($orderErrors)): ?>
-                <div class="message error">
-                    <ul>
-                        <?php foreach ($orderErrors as $err): ?>
-                            <li><?= htmlspecialchars($err) ?></li>
-                        <?php endforeach; ?>
-                    </ul>
-                </div>
-            <?php endif; ?>
-
-
-            <?php if (isset($_SESSION['user_id'])): ?>
-                <h3>Оформить заказ</h3>
-                <form method="post" action="product.php?id=<?= (int)$product['id'] ?>">
-                    <p>
-                        <label>Количество:<br>
-                            <input type="number" name="quantity" value="1" min="1" max="100" required>
-                        </label>
-                    </p>
-                    <p>
-                        <label>Комментарий к заказу (необязательно):<br>
-                            <textarea name="comment" rows="3" cols="40"></textarea>
-                        </label>
-                    </p>
-                    <p>
-                        <button type="submit" name="order_submit" value="1">Отправить заказ</button>
-                    </p>
-                </form>
-            <?php else: ?>
-                <p>
-                    Чтобы оформить заказ,
-                    <a href="register.php">зарегистрируйтесь</a>
-                    или <a href="login.php">войдите</a>.
-                </p>
-            <?php endif; ?>
-
-            <p><a href="catalog.php">← Вернуться в каталог</a></p>
-        </div>
     </div>
-</div>
+
+<?php if (!empty($errors)): ?>
+    <div class="message error">
+        <?php foreach ($errors as $error): ?>
+            <div><?= e($error) ?></div>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
+
+    <div class="card">
+        <?php if ($productImages): ?>
+            <div style="margin-bottom: 20px;">
+                <?php $mainImage = $productImages[0]['image_path']; ?>
+                <img
+                        src="/3d_print_shop/<?= e($mainImage) ?>"
+                        alt="<?= e(tdb($product, 'name')) ?>"
+                        style="max-width: 100%; border-radius: 16px; margin-bottom: 14px;"
+                >
+
+                <?php if (count($productImages) > 1): ?>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <?php foreach ($productImages as $image): ?>
+                            <img
+                                    src="/3d_print_shop/<?= e($image['image_path']) ?>"
+                                    alt="<?= e(tdb($product, 'name')) ?>"
+                                    style="width: 90px; height: 90px; object-fit: cover; border-radius: 12px; border: 1px solid #e5e7eb;"
+                            >
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <p>
+            <strong><?= e(t('product.short_description')) ?>:</strong>
+            <?= e(tdb($product, 'short_description') ?: t('common.none')) ?>
+        </p>
+
+        <p>
+            <strong><?= e(t('product.description')) ?>:</strong><br>
+            <?= nl2br(e(tdb($product, 'description') ?: t('common.none'))) ?>
+        </p>
+
+        <p class="price">
+            <strong><?= e(t('product.price')) ?>:</strong>
+            €<?= number_format((float)$product['price'], 2) ?>
+        </p>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">
+            <?php if ($userId > 0): ?>
+                <a class="btn btn-secondary" href="/3d_print_shop/add_to_cart.php?id=<?= (int)$product['id'] ?>">В корзину</a>
+                <a class="btn <?= $isWishlisted ? 'btn-danger' : 'btn-secondary' ?>" href="/3d_print_shop/toggle_wishlist.php?id=<?= (int)$product['id'] ?>">
+                    <?= $isWishlisted ? 'Убрать из избранного' : 'Добавить в избранное' ?>
+                </a>
+            <?php endif; ?>
+        </div>
+
+        <?php if (isLoggedIn()): ?>
+            <form method="post">
+                <label for="quantity"><?= e(t('common.quantity')) ?></label>
+                <input
+                        type="number"
+                        id="quantity"
+                        name="quantity"
+                        min="1"
+                        max="100"
+                        value="1"
+                        required
+                >
+
+                <button type="submit"><?= e(t('product.order')) ?></button>
+            </form>
+        <?php else: ?>
+            <div class="message info">
+                <?= e(t('product.login_required')) ?>
+                <a href="/3d_print_shop/login.php"><?= e(t('nav.login')) ?></a>.
+            </div>
+        <?php endif; ?>
+    </div>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

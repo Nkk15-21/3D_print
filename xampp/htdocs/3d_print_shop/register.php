@@ -1,165 +1,147 @@
 <?php
-// register.php — регистрация нового пользователя
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 
-$name = '';
-$email = '';
-$phone = '';
 $errors = [];
 
-// Обработка формы
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name  = trim($_POST['name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-    $password = $_POST['password'] ?? '';
-    $password_confirm = $_POST['password_confirm'] ?? '';
+    $name = trim((string)($_POST['name'] ?? ''));
+    $email = trim((string)($_POST['email'] ?? ''));
+    $phone = trim((string)($_POST['phone'] ?? ''));
+    $password = (string)($_POST['password'] ?? '');
+    $passwordRepeat = (string)($_POST['password_repeat'] ?? '');
 
-    // Простая проверка
-    if ($name === '') {
-        $errors[] = 'Введите имя.';
-    } elseif (!preg_match('/^[A-Za-zА-Яа-яЁё\s\-]{2,50}$/u', $name)) {
-        $errors[] = 'Имя может содержать только буквы, пробел и дефис (2–50 символов).';
+    if (!isValidName($name)) {
+        $errors[] = t('register.name_error');
     }
 
-    if ($email === '') {
-        $errors[] = 'Введите e-mail.';
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = 'Неверный формат e-mail.';
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = t('register.email_error');
     }
 
-    if ($phone !== '' && !preg_match('/^[0-9+\-\s]{5,20}$/', $phone)) {
-        $errors[] = 'Телефон может содержать только цифры, пробелы, + и - (5–20 символов).';
+    if (!isValidPhone($phone)) {
+        $errors[] = t('register.phone_error');
     }
 
-    if ($password === '') {
-        $errors[] = 'Введите пароль.';
-    } elseif (strlen($password) < 6) {
-        $errors[] = 'Пароль должен быть не короче 6 символов.';
+    if (mb_strlen($password) < 6) {
+        $errors[] = t('register.password_error');
     }
 
-    if ($password !== $password_confirm) {
-        $errors[] = 'Пароль и подтверждение не совпадают.';
+    if ($password !== $passwordRepeat) {
+        $errors[] = t('register.password_match_error');
     }
 
-    // Проверяем, есть ли уже такой e-mail
-    if (empty($errors)) {
-        $stmt = $mysqli->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
-        if ($stmt) {
-            $stmt->bind_param('s', $email);
-            $stmt->execute();
-            $stmt->store_result();
+    if (!$errors) {
+        $stmt = $mysqli->prepare("
+            SELECT id
+            FROM users
+            WHERE email = ?
+            LIMIT 1
+        ");
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $existingUser = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
 
-            if ($stmt->num_rows > 0) {
-                $errors[] = 'Пользователь с таким e-mail уже зарегистрирован.';
-            }
-
-            $stmt->close();
-        } else {
-            $errors[] = 'Ошибка подготовки запроса: ' . htmlspecialchars($mysqli->error);
+        if ($existingUser) {
+            $errors[] = t('register.email_exists');
         }
     }
 
-    // Если ошибок нет — создаём пользователя
-    if (empty($errors)) {
-        $password_hash = password_hash($password, PASSWORD_DEFAULT);
+    if (!$errors) {
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
-        $stmt = $mysqli->prepare("INSERT INTO users (name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, 'user')");
-        if ($stmt) {
-            $stmt->bind_param('ssss', $name, $email, $phone, $password_hash);
-            $ok = $stmt->execute();
-            if ($ok) {
-                $newUserId = $stmt->insert_id;
-                $stmt->close();
+        $stmt = $mysqli->prepare("
+            INSERT INTO users (
+                name,
+                email,
+                phone,
+                password_hash,
+                role
+            )
+            VALUES (?, ?, ?, ?, 'user')
+        ");
+        $stmt->bind_param('ssss', $name, $email, $phone, $passwordHash);
 
-                // Автоматически логиним пользователя
-                $_SESSION['user_id']   = $newUserId;
-                $_SESSION['user_name'] = $name;
-                $_SESSION['user_role'] = 'user';
+        if ($stmt->execute()) {
+            $userId = $stmt->insert_id;
+            $stmt->close();
 
-                // Флеш-сообщение
-                $_SESSION['flash_success'] = 'Вы успешно зарегистрировались!';
+            $_SESSION['user_id'] = (int)$userId;
+            $_SESSION['user_name'] = $name;
+            $_SESSION['user_role'] = 'user';
 
-                header('Location: profile.php');
-                exit;
-            } else {
-                $errors[] = 'Не удалось создать пользователя: ' . htmlspecialchars($stmt->error);
-                $stmt->close();
-            }
+            setFlash('success', t('register.success'));
+            redirect('/3d_print_shop/profile.php');
         } else {
-            $errors[] = 'Ошибка подготовки запроса: ' . htmlspecialchars($mysqli->error);
+            $stmt->close();
+            $errors[] = t('register.save_error');
         }
     }
 }
+
+require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Регистрация</h2>
+    <div class="page-header">
+        <h1><?= e(t('register.title')) ?></h1>
+        <p><?= e(t('register.subtitle')) ?></p>
+    </div>
 
 <?php if (!empty($errors)): ?>
     <div class="message error">
-        <ul>
-            <?php foreach ($errors as $error): ?>
-                <li><?= htmlspecialchars($error) ?></li>
-            <?php endforeach; ?>
-        </ul>
+        <?php foreach ($errors as $error): ?>
+            <div><?= e($error) ?></div>
+        <?php endforeach; ?>
     </div>
 <?php endif; ?>
 
-<form method="post" action="register.php">
-    <p>
-        <label>Имя:<br>
-            <input
-                    type="text"
-                    name="name"
-                    value="<?= htmlspecialchars($name) ?>"
-                    required
-                    pattern="[A-Za-zА-Яа-яЁё\s\-]{2,50}"
-                    title="Только буквы, пробел и дефис, 2–50 символов">
-        </label>
-    </p>
+    <form method="post">
+        <label for="name"><?= e(t('common.name')) ?></label>
+        <input
+                type="text"
+                id="name"
+                name="name"
+                value="<?= e(old('name')) ?>"
+                required
+        >
 
-    <p>
-        <label>E-mail (логин):<br>
-            <input
-                    type="email"
-                    name="email"
-                    value="<?= htmlspecialchars($email) ?>"
-                    required>
-        </label>
-    </p>
+        <label for="email"><?= e(t('common.email')) ?></label>
+        <input
+                type="email"
+                id="email"
+                name="email"
+                value="<?= e(old('email')) ?>"
+                required
+        >
 
-    <p>
-        <label>Телефон (необязательно):<br>
-            <input
-                    type="tel"
-                    name="phone"
-                    value="<?= htmlspecialchars($phone) ?>"
-                    pattern="[0-9+\-\s]{5,20}"
-                    title="Только цифры, пробелы, + и -, 5–20 символов">
-        </label>
-    </p>
+        <label for="phone"><?= e(t('common.phone')) ?></label>
+        <input
+                type="text"
+                id="phone"
+                name="phone"
+                value="<?= e(old('phone')) ?>"
+        >
 
-    <p>
-        <label>Пароль:<br>
-            <input type="password" name="password" required minlength="6">
-        </label>
-    </p>
+        <label for="password"><?= e(t('common.password')) ?></label>
+        <input
+                type="password"
+                id="password"
+                name="password"
+                required
+        >
 
-    <p>
-        <label>Повторите пароль:<br>
-            <input type="password" name="password_confirm" required minlength="6">
-        </label>
-    </p>
+        <label for="password_repeat"><?= e(t('register.password_repeat')) ?></label>
+        <input
+                type="password"
+                id="password_repeat"
+                name="password_repeat"
+                required
+        >
 
-    <p>
-        <button type="submit">Зарегистрироваться</button>
-    </p>
-</form>
-
-<p>Уже есть аккаунт? <a href="login.php">Войти</a></p>
+        <button type="submit"><?= e(t('register.submit')) ?></button>
+    </form>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

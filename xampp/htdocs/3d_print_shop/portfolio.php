@@ -1,54 +1,44 @@
 <?php
-// portfolio.php — портфолио выполненных работ
-
-require_once __DIR__ . '/includes/db.php';
+declare(strict_types=1);
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Портфолио</h2>
-
-<p>Здесь собраны примеры работ, напечатанных на 3D-принтере: декоративные изделия, полезные детали и прототипы.</p>
-
-<div class="product-list">
-    <div class="product-card">
-        <h3>Фигурка дракона</h3>
-        <div class="product-image">
-            <img src="uploads/images/dragon_pla.jpg" alt="Фигурка дракона">
-        </div>
-        <p class="product-category">Материал: Bambu PLA Basic</p>
-        <p>Декоративная фигурка, высота ~12 см. Печать с высотой слоя 0.12 мм.</p>
+    <div class="page-header">
+        <h1>Портфолио</h1>
+        <p>Примеры изделий и проектов, которые можно выполнить с помощью 3D-печати.</p>
     </div>
 
-    <div class="product-card">
-        <h3>Подставка для телефона</h3>
-        <div class="product-image">
-            <img src="uploads/images/phone_stand.jpg" alt="Подставка для телефона">
+    <div class="grid-3">
+        <div class="card">
+            <h3>Фигурка дракона</h3>
+            <p>Декоративная модель с проработанными деталями для коллекции или подарка.</p>
         </div>
-        <p class="product-category">Материал: Bambu PETG Basic</p>
-        <p>Устойчивая подставка, рассчитанная на ежедневное использование.</p>
-    </div>
 
-    <div class="product-card">
-        <h3>Кронштейн для полки</h3>
-        <div class="product-image">
-            <img src="uploads/images/bracket_petg.jpg" alt="Кронштейн для полки">
+        <div class="card">
+            <h3>Подставка для телефона</h3>
+            <p>Компактный и полезный аксессуар для рабочего стола и домашнего использования.</p>
         </div>
-        <p class="product-category">Материал: Bambu PETG-CF</p>
-        <p>Функциональный кронштейн с усиленной прочностью, 40% заполнение.</p>
-    </div>
 
-    <div class="product-card">
-        <h3>Прототип шестерни</h3>
-        <div class="product-image">
-            <img src="uploads/images/gear_proto.jpg" alt="Прототип шестерни">
+        <div class="card">
+            <h3>Кронштейн</h3>
+            <p>Функциональная деталь для крепления и небольших бытовых задач.</p>
         </div>
-        <p class="product-category">Материал: Bambu PLA Tough</p>
-        <p>Тестовая деталь для проверки посадки и зацепления в механизме.</p>
-    </div>
-</div>
 
-<p>Позже сюда можно добавить реальные фото с принтера и реальные кейсы клиентов.</p>
+        <div class="card">
+            <h3>Прототип шестерни</h3>
+            <p>Тестовая модель для проверки размеров, формы и посадки перед дальнейшей доработкой.</p>
+        </div>
+
+        <div class="card">
+            <h3>Органайзер для кабелей</h3>
+            <p>Небольшой практичный предмет, который помогает держать рабочее место в порядке.</p>
+        </div>
+
+        <div class="card">
+            <h3>Декоративный элемент</h3>
+            <p>Предмет интерьера, изготовленный под конкретный стиль, цвет и размер.</p>
+        </div>
+    </div>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

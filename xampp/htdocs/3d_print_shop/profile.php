@@ -1,223 +1,175 @@
 <?php
-// profile.php — личный кабинет пользователя
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/header.php';
-
-// Если пользователь не залогинен — отправляем на вход
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
-}
+require_once __DIR__ . '/includes/auth.php';
+requireLogin();
 
 $userId = (int)$_SESSION['user_id'];
 
-// Получаем данные пользователя
-$userName = '';
-$userEmail = '';
-$userPhone = '';
-$userCreatedAt = '';
-
-$stmtUser = $mysqli->prepare("
+$stmt = $mysqli->prepare("
     SELECT name, email, phone, created_at
     FROM users
     WHERE id = ?
     LIMIT 1
 ");
-if ($stmtUser) {
-    $stmtUser->bind_param('i', $userId);
-    $stmtUser->execute();
-    $stmtUser->bind_result($userName, $userEmail, $userPhone, $userCreatedAt);
-    $stmtUser->fetch();
-    $stmtUser->close();
-}
+$stmt->bind_param('i', $userId);
+$stmt->execute();
+$user = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-// =========================
-// Заказы готовых товаров
-// =========================
-
-$productOrders = [];
-
-$sqlOrders = "
+$stmt = $mysqli->prepare("
     SELECT
-        o.id              AS order_id,
-        o.created_at      AS order_created_at,
-        o.status          AS order_status,
-        oi.quantity       AS item_quantity,
-        oi.unit_price     AS item_price,
-        (oi.quantity * oi.unit_price) AS item_total,
-        p.name            AS product_name
+        o.*,
+        os.code AS status_code,
+        os.name_ru AS status_name_ru,
+        os.name_en AS status_name_en,
+        os.name_et AS status_name_et
     FROM orders o
-    JOIN order_items oi ON oi.order_id = o.id
-    JOIN products p     ON p.id = oi.product_id
+    LEFT JOIN order_statuses os ON os.id = o.status_id
     WHERE o.user_id = ?
-    ORDER BY o.created_at DESC, o.id DESC
-";
+    ORDER BY o.created_at DESC
+");
+$stmt->bind_param('i', $userId);
+$stmt->execute();
+$orders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 
-$stmtOrders = $mysqli->prepare($sqlOrders);
-if ($stmtOrders) {
-    $stmtOrders->bind_param('i', $userId);
-    $stmtOrders->execute();
-    $resultOrders = $stmtOrders->get_result();
-    while ($row = $resultOrders->fetch_assoc()) {
-        $productOrders[] = $row;
-    }
-    $stmtOrders->close();
-}
-
-// =========================
-// Индивидуальные заказы
-// =========================
-
-$customOrders = [];
-
-$sqlCustom = "
-    SELECT
-        id,
-        created_at,
-        material,
-        color,
-        layer_height,
-        infill,
-        estimated_price,
-        status,
-        model_file
+$stmt = $mysqli->prepare("
+    SELECT *
     FROM custom_orders
     WHERE user_id = ?
-    ORDER BY created_at DESC, id DESC
-";
+    ORDER BY created_at DESC
+");
+$stmt->bind_param('i', $userId);
+$stmt->execute();
+$customOrders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 
-$stmtCustom = $mysqli->prepare($sqlCustom);
-if ($stmtCustom) {
-    $stmtCustom->bind_param('i', $userId);
-    $stmtCustom->execute();
-    $resultCustom = $stmtCustom->get_result();
-    while ($row = $resultCustom->fetch_assoc()) {
-        $customOrders[] = $row;
-    }
-    $stmtCustom->close();
+function getStatusBadgeClassProfile(string $status): string
+{
+    return match ($status) {
+        'new' => 'badge badge-new',
+        'processing' => 'badge badge-processing',
+        'done' => 'badge badge-done',
+        'cancelled' => 'badge badge-cancelled',
+        default => 'badge'
+    };
 }
+
+require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Личный кабинет</h2>
+    <div class="page-header">
+        <h1><?= e(t('profile.title')) ?></h1>
+    </div>
 
-<p>Привет, <?= htmlspecialchars($userName ?: 'пользователь') ?>!</p>
+    <div class="card">
+        <h3><?= e(t('profile.user_data')) ?></h3>
+        <p><strong><?= e(t('common.name')) ?>:</strong> <?= e($user['name']) ?></p>
+        <p><strong><?= e(t('common.email')) ?>:</strong> <?= e($user['email']) ?></p>
+        <p><strong><?= e(t('common.phone')) ?>:</strong> <?= e($user['phone'] ?: t('common.none')) ?></p>
+        <p><strong><?= e(t('profile.register_date')) ?>:</strong> <?= e($user['created_at']) ?></p>
+    </div>
 
-<hr>
+    <br>
 
-<h3>Мои данные</h3>
-<p><strong>E-mail:</strong> <?= htmlspecialchars($userEmail) ?></p>
-<?php if ($userPhone): ?>
-    <p><strong>Телефон:</strong> <?= htmlspecialchars($userPhone) ?></p>
-<?php endif; ?>
-<?php if ($userCreatedAt): ?>
-    <p><strong>Аккаунт создан:</strong> <?= htmlspecialchars($userCreatedAt) ?></p>
-<?php endif; ?>
+    <h2 class="section-title"><?= e(t('profile.orders')) ?></h2>
 
-<hr>
-
-<h3>Мои заказы товаров</h3>
-
-<?php if (empty($productOrders)): ?>
-    <p>Вы ещё не оформляли заказы готовых товаров.</p>
+<?php if (!$orders): ?>
+    <div class="message info"><?= e(t('profile.no_orders')) ?></div>
 <?php else: ?>
-    <table>
-        <thead>
-        <tr>
-            <th>ID заказа</th>
-            <th>Дата</th>
-            <th>Товар</th>
-            <th>Кол-во</th>
-            <th>Цена за шт.</th>
-            <th>Сумма</th>
-            <th>Статус</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($productOrders as $row): ?>
-            <tr>
-                <td>#<?= (int)$row['order_id'] ?></td>
-                <td><?= htmlspecialchars($row['order_created_at']) ?></td>
-                <td><?= htmlspecialchars($row['product_name']) ?></td>
-                <td><?= (int)$row['item_quantity'] ?></td>
-                <td><?= number_format((float)$row['item_price'], 2, ',', ' ') ?> €</td>
-                <td><?= number_format((float)$row['item_total'], 2, ',', ' ') ?> €</td>
-                <td>
-                    <?php
-                    switch ($row['order_status']) {
-                        case 'processing': echo 'В обработке'; break;
-                        case 'done':       echo 'Готов'; break;
-                        case 'cancelled':  echo 'Отменён'; break;
-                        default:           echo 'Новый';
-                    }
-                    ?>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
+    <?php foreach ($orders as $order): ?>
+        <?php
+        $statusCode = $order['status_code'] ?: $order['status'] ?: 'new';
+        $statusTitle = tdb([
+            'name_ru' => $order['status_name_ru'] ?? '',
+            'name_en' => $order['status_name_en'] ?? '',
+            'name_et' => $order['status_name_et'] ?? '',
+            'name' => $statusCode,
+        ], 'name');
+        ?>
+        <div class="card" style="margin-bottom: 20px;">
+            <p>
+                <strong>#<?= (int)$order['id'] ?></strong>
+                —
+                <span class="<?= getStatusBadgeClassProfile($statusCode) ?>">
+                    <?= e($statusTitle) ?>
+                </span>
+            </p>
+
+            <p><strong><?= e(t('common.date')) ?>:</strong> <?= e($order['created_at']) ?></p>
+            <p><strong><?= e(t('common.total')) ?>:</strong> €<?= number_format((float)$order['total_amount'], 2) ?></p>
+
+            <h4><?= e(t('admin.orders.items')) ?>:</h4>
+
+            <ul class="clean-list">
+                <?php
+                $stmt = $mysqli->prepare("
+                    SELECT
+                        oi.quantity,
+                        oi.unit_price,
+                        p.name,
+                        p.name_ru,
+                        p.name_en,
+                        p.name_et
+                    FROM order_items oi
+                    JOIN products p ON p.id = oi.product_id
+                    WHERE oi.order_id = ?
+                ");
+                $stmt->bind_param('i', $order['id']);
+                $stmt->execute();
+                $items = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $stmt->close();
+                ?>
+
+                <?php foreach ($items as $item): ?>
+                    <li>
+                        <?= e(tdb($item, 'name')) ?> —
+                        <?= (int)$item['quantity'] ?> × €<?= number_format((float)$item['unit_price'], 2) ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endforeach; ?>
 <?php endif; ?>
 
-<hr>
+    <h2 class="section-title"><?= e(t('profile.custom_orders')) ?></h2>
 
-<h3>Мои индивидуальные заказы</h3>
-
-<?php if (empty($customOrders)): ?>
-    <p>У вас пока нет индивидуальных заказов. Вы можете оформить его на странице <a href="custom_order.php">«Индивидуальный заказ»</a>.</p>
+<?php if (!$customOrders): ?>
+    <div class="message info"><?= e(t('profile.no_custom_orders')) ?></div>
 <?php else: ?>
-    <table>
-        <thead>
-        <tr>
-            <th>ID</th>
-            <th>Дата</th>
-            <th>Материал</th>
-            <th>Цвет</th>
-            <th>Высота слоя, мм</th>
-            <th>Заполнение, %</th>
-            <th>Ориентировочная цена</th>
-            <th>Статус</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($customOrders as $row): ?>
-            <tr>
-                <td>#<?= (int)$row['id'] ?></td>
-                <td><?= htmlspecialchars($row['created_at']) ?></td>
-                <td><?= htmlspecialchars($row['material']) ?></td>
-                <td><?= htmlspecialchars($row['color']) ?></td>
-                <td>
-                    <?= $row['layer_height'] !== null
-                        ? htmlspecialchars(rtrim(rtrim($row['layer_height'], '0'), '.'))
-                        : '—' ?>
-                </td>
-                <td>
-                    <?= $row['infill'] !== null
-                        ? (int)$row['infill']
-                        : '—' ?>
-                </td>
-                <td>
-                    <?php if ($row['estimated_price'] !== null): ?>
-                        <?= number_format((float)$row['estimated_price'], 2, ',', ' ') ?> €
-                    <?php else: ?>
-                        —
-                    <?php endif; ?>
-                </td>
-                <td>
-                    <?php
-                    switch ($row['status']) {
-                        case 'processing': echo 'В обработке'; break;
-                        case 'done':       echo 'Готов'; break;
-                        case 'cancelled':  echo 'Отменён'; break;
-                        default:           echo 'Новый';
-                    }
-                    ?>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
+    <?php foreach ($customOrders as $order): ?>
+        <div class="card" style="margin-bottom: 20px;">
+            <p>
+                <strong>#<?= (int)$order['id'] ?></strong>
+                —
+                <span class="<?= getStatusBadgeClassProfile($order['status']) ?>">
+                    <?= e(t('status.' . $order['status'])) ?>
+                </span>
+            </p>
+
+            <p><strong><?= e(t('common.material')) ?>:</strong> <?= e($order['material']) ?></p>
+            <p><strong><?= e(t('common.color')) ?>:</strong> <?= e($order['color'] ?: t('common.none')) ?></p>
+            <p><strong><?= e(t('common.layer_height')) ?>:</strong> <?= e((string)$order['layer_height']) ?> мм</p>
+            <p><strong><?= e(t('common.infill')) ?>:</strong> <?= e((string)$order['infill']) ?>%</p>
+
+            <?php if ($order['estimated_price'] !== null): ?>
+                <p><strong><?= e(t('profile.estimated_price')) ?>:</strong> €<?= number_format((float)$order['estimated_price'], 2) ?></p>
+            <?php endif; ?>
+
+            <p>
+                <strong><?= e(t('common.file')) ?>:</strong>
+                <a href="/3d_print_shop/<?= e($order['model_file']) ?>" target="_blank"><?= e(t('common.download')) ?></a>
+            </p>
+
+            <p><strong><?= e(t('common.date')) ?>:</strong> <?= e($order['created_at']) ?></p>
+
+            <?php if (!empty($order['comment'])): ?>
+                <p><strong><?= e(t('common.comment')) ?>:</strong><br><?= nl2br(e($order['comment'])) ?></p>
+            <?php endif; ?>
+        </div>
+    <?php endforeach; ?>
 <?php endif; ?>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

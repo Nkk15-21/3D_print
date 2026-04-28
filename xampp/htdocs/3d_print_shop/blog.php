@@ -1,37 +1,30 @@
 <?php
-// blog.php — раздел "Блог"
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Блог о 3D-печати</h2>
-
-<p>В этом разделе можно разместить статьи для клиентов: как подготовить модель, какой материал выбрать и т.п.</p>
-
-<div class="product-list">
-    <div class="product-card">
-        <h3>Как подготовить модель к 3D-печати</h3>
-        <p class="product-category">Тема: основы моделирования</p>
-        <p>Кратко о том, какие параметры стоит проверить перед отправкой файла в печать: толщина стенок, наличие
-            тонких элементов, закрытые поверхности, масштаб модели.</p>
+    <div class="page-header">
+        <h1><?= e(t('blog.title')) ?></h1>
+        <p><?= e(t('blog.subtitle')) ?></p>
     </div>
 
-    <div class="product-card">
-        <h3>Какой материал выбрать: PLA, PETG или ABS?</h3>
-        <p class="product-category">Тема: выбор материала</p>
-        <p>Объяснение, чем отличаются PLA, PETG и ABS, когда лучше брать прочный PETG, а когда достаточно PLA.</p>
-    </div>
+    <div class="grid-3">
+        <div class="card">
+            <h3><?= e(t('blog.prepare.title')) ?></h3>
+            <p><?= e(t('blog.prepare.text')) ?></p>
+        </div>
 
-    <div class="product-card">
-        <h3>Что влияет на цену 3D-печати</h3>
-        <p class="product-category">Тема: стоимость</p>
-        <p>Разбор того, от чего зависит цена: объём модели, время печати, материал, заполнение, постобработка.</p>
-    </div>
-</div>
+        <div class="card">
+            <h3><?= e(t('blog.material.title')) ?></h3>
+            <p><?= e(t('blog.material.text')) ?></p>
+        </div>
 
-<p>Позже можно вынести статьи в отдельную таблицу в базе и выводить их динамически.</p>
+        <div class="card">
+            <h3><?= e(t('blog.price.title')) ?></h3>
+            <p><?= e(t('blog.price.text')) ?></p>
+        </div>
+    </div>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

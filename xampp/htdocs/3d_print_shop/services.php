@@ -1,46 +1,46 @@
 <?php
-// services.php — страница "Услуги"
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Услуги 3D-печати</h2>
+    <div class="page-header">
+        <h1><?= e(t('services.title')) ?></h1>
+        <p><?= e(t('services.subtitle')) ?></p>
+    </div>
 
-<p>Я занимаюсь 3D-печатью на домашнем оборудовании и принимаю как небольшие, так и более серьёзные заказы.</p>
+    <div class="grid-3">
+        <div class="card">
+            <h3><?= e(t('services.ready.title')) ?></h3>
+            <p><?= e(t('services.ready.text')) ?></p>
+        </div>
 
-<h3>Основные услуги</h3>
+        <div class="card">
+            <h3><?= e(t('services.proto.title')) ?></h3>
+            <p><?= e(t('services.proto.text')) ?></p>
+        </div>
 
-<ul>
-    <li><strong>Печать готовых моделей</strong> — вы присылаете STL/OBJ, я печатаю и отправляю готовую деталь.</li>
-    <li><strong>Прототипирование</strong> — печать прототипов деталей, корпусов, крепежей перед серийным производством.</li>
-    <li><strong>Фигурки и декор</strong> — фигурки, сувениры, элементы интерьера.</li>
-    <li><strong>Запасные детали</strong> — кронштейны, крепления, переходники и другие полезные мелочи.</li>
-</ul>
+        <div class="card">
+            <h3><?= e(t('services.parts.title')) ?></h3>
+            <p><?= e(t('services.parts.text')) ?></p>
+        </div>
 
-<h3>Дополнительные услуги</h3>
+        <div class="card">
+            <h3><?= e(t('services.modeling.title')) ?></h3>
+            <p><?= e(t('services.modeling.text')) ?></p>
+        </div>
 
-<ul>
-    <li><strong>3D-моделирование</strong> — разработка модели по вашим чертежам, фото или описанию.</li>
-    <li><strong>Постобработка</strong> — шлифовка, грунтовка, покраска, сборка.</li>
-    <li><strong>Подбор материала</strong> — помощь в выборе между PLA, PETG, ABS, PA-CF и т.д. под вашу задачу.</li>
-</ul>
+        <div class="card">
+            <h3><?= e(t('services.post.title')) ?></h3>
+            <p><?= e(t('services.post.text')) ?></p>
+        </div>
 
-<h3>Материалы и качество</h3>
-
-<p>Печать выполняется с использованием фирменных пластиков Bambu Lab (PLA, PETG, ABS, PA-CF и др.).
-    Типичные параметры печати:</p>
-
-<ul>
-    <li>Высота слоя: 0.12–0.28 мм (по договорённости)</li>
-    <li>Заполняемость: 10–100% в зависимости от нагрузки</li>
-    <li>Максимальный размер детали зависит от рабочей области принтера</li>
-</ul>
-
-<p>Для точного расчёта стоимости вы можете воспользоваться разделом
-    <a href="custom_order.php">«Индивидуальный заказ»</a> или отправить сообщение через
-    <a href="contacts.php">форму контактов</a>.</p>
+        <div class="card">
+            <h3><?= e(t('services.materials.title')) ?></h3>
+            <p><?= e(t('services.materials.text')) ?></p>
+        </div>
+    </div>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

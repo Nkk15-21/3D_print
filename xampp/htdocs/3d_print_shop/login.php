@@ -1,92 +1,77 @@
 <?php
-// login.php — вход пользователя
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 
-$email = '';
 $errors = [];
 
-// Если уже вошёл — отправим в профиль
-if (isset($_SESSION['user_id'])) {
-    header('Location: profile.php');
-    exit;
-}
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email    = trim($_POST['email'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $email = trim((string)($_POST['email'] ?? ''));
+    $password = (string)($_POST['password'] ?? '');
 
-    if ($email === '' || $password === '') {
-        $errors[] = 'Введите e-mail и пароль.';
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $password === '') {
+        $errors[] = t('login.error');
     } else {
-        $stmt = $mysqli->prepare("SELECT id, name, password_hash, role FROM users WHERE email = ? LIMIT 1");
-        if ($stmt) {
-            $stmt->bind_param('s', $email);
-            $stmt->execute();
-            $stmt->store_result();
+        $stmt = $mysqli->prepare("
+            SELECT id, name, email, password_hash, role
+            FROM users
+            WHERE email = ?
+            LIMIT 1
+        ");
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $user = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
 
-            if ($stmt->num_rows === 1) {
-                $stmt->bind_result($id, $name, $password_hash, $role);
-                $stmt->fetch();
+        if ($user && password_verify($password, $user['password_hash'])) {
+            $_SESSION['user_id'] = (int)$user['id'];
+            $_SESSION['user_name'] = $user['name'];
+            $_SESSION['user_role'] = $user['role'];
 
-                if (password_verify($password, $password_hash)) {
-                    // Всё ок — логиним
-                    $_SESSION['user_id']   = $id;
-                    $_SESSION['user_name'] = $name;
-                    $_SESSION['user_role'] = $role;
-
-                    $_SESSION['flash_success'] = 'Вы успешно вошли в аккаунт.';
-
-                    header('Location: profile.php');
-                    exit;
-                } else {
-                    $errors[] = 'Неверный пароль.';
-                }
-            } else {
-                $errors[] = 'Пользователь с таким e-mail не найден.';
-            }
-
-            $stmt->close();
+            setFlash('success', t('login.success'));
+            redirect('/3d_print_shop/profile.php');
         } else {
-            $errors[] = 'Ошибка подготовки запроса: ' . htmlspecialchars($mysqli->error);
+            $errors[] = t('login.error');
         }
     }
 }
+
+require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Вход</h2>
+    <div class="page-header">
+        <h1><?= e(t('login.title')) ?></h1>
+        <p><?= e(t('login.subtitle')) ?></p>
+    </div>
 
 <?php if (!empty($errors)): ?>
     <div class="message error">
-        <ul>
-            <?php foreach ($errors as $error): ?>
-                <li><?= htmlspecialchars($error) ?></li>
-            <?php endforeach; ?>
-        </ul>
+        <?php foreach ($errors as $error): ?>
+            <div><?= e($error) ?></div>
+        <?php endforeach; ?>
     </div>
 <?php endif; ?>
 
-<form method="post" action="login.php">
-    <p>
-        <label>E-mail:<br>
-            <input type="email" name="email" value="<?= htmlspecialchars($email) ?>" required>
-        </label>
-    </p>
+    <form method="post">
+        <label for="email"><?= e(t('common.email')) ?></label>
+        <input
+                type="email"
+                id="email"
+                name="email"
+                value="<?= e(old('email')) ?>"
+                required
+        >
 
-    <p>
-        <label>Пароль:<br>
-            <input type="password" name="password" required>
-        </label>
-    </p>
+        <label for="password"><?= e(t('common.password')) ?></label>
+        <input
+                type="password"
+                id="password"
+                name="password"
+                required
+        >
 
-    <p>
-        <button type="submit">Войти</button>
-    </p>
-</form>
-
-<p>Нет аккаунта? <a href="register.php">Зарегистрируйтесь</a></p>
+        <button type="submit"><?= e(t('login.submit')) ?></button>
+    </form>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>

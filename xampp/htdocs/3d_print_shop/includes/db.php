@@ -1,17 +1,20 @@
 <?php
-// includes/db.php
+declare(strict_types=1);
 
-// Настройки БД — пока так, потом сделаем базу через phpMyAdmin
-$db_host = 'localhost';
-$db_user = 'root';          // в XAMPP по умолчанию root
-$db_pass = '';              // в XAMPP по умолчанию пустой пароль
-$db_name = '3d_print_shop'; // так назовём нашу базу данных
+$host = 'localhost';
+$user = 'root';
+$password = '';
+$database = '3d_print_shop';
 
-$mysqli = new mysqli($db_host, $db_user, $db_pass, $db_name);
+$mysqli = @new mysqli($host, $user, $password, $database);
 
-
-if ($mysqli->connect_error) {
-    die('Ошибка подключения к базе данных: ' . $mysqli->connect_error);
+if ($mysqli->connect_errno) {
+    die(
+        '<h2>Ошибка подключения к базе данных</h2>' .
+        '<p>Не удалось подключиться к базе <strong>3d_print_shop</strong>.</p>' .
+        '<p>Запусти <a href="install.php">install.php</a> и проверь, что MySQL запущен в XAMPP.</p>' .
+        '<p>Техническая информация: (' . $mysqli->connect_errno . ') ' . htmlspecialchars($mysqli->connect_error) . '</p>'
+    );
 }
 
 $mysqli->set_charset('utf8mb4');

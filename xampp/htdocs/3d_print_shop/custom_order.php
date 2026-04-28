@@ -1,469 +1,346 @@
 <?php
-// custom_order.php — индивидуальный заказ с загрузкой 3D-файла и примерным расчётом цены
+declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/header.php';
-
-// Список материалов Bambu Lab для выпадающего списка
-$materialsList = [
-    'Bambu PLA Basic',
-    'Bambu PLA Matte',
-    'Bambu PLA Tough',
-    'Bambu PLA Silk',
-    'Bambu PLA Silk+',
-    'Bambu PLA Galaxy',
-    'Bambu PLA Marble',
-    'Bambu PLA Translucent',
-    'Bambu PLA Dynamic',
-    'Bambu PLA Glow',
-    'Bambu PLA Metal',
-    'Bambu PLA Wood',
-    'Bambu PLA-CF',
-
-    'Bambu PETG Basic',
-    'Bambu PETG Translucent',
-    'Bambu PETG HF',
-    'Bambu PETG-CF',
-
-    'Bambu ABS',
-    'Bambu ASA',
-    'Bambu PC',
-
-    'Bambu PA (Nylon)',
-    'Bambu PA-CF',
-    'Bambu PAHT-CF',
-
-    'Bambu TPU 95A',
-
-    'Bambu Support G',
-    'Bambu Support W',
-
-    'Другое (указать в комментарии)',
-];
-
-// Пользователь должен быть залогинен
-if (!isset($_SESSION['user_id'])) {
-    ?>
-    <h2>Индивидуальный заказ</h2>
-    <p>Чтобы оформить индивидуальный заказ, нужно <a href="login.php">войти</a> или <a href="register.php">зарегистрироваться</a>.</p>
-    <?php
-    require_once __DIR__ . '/includes/footer.php';
-    exit;
-}
+require_once __DIR__ . '/includes/auth.php';
+requireLogin();
 
 $userId = (int)$_SESSION['user_id'];
+$materialsList = getMaterialsList();
+$errors = [];
+$estimatedPricePreview = null;
 
-// Берём данные пользователя (для записи в таблицу)
-$stmtUser = $mysqli->prepare("SELECT name, email, phone FROM users WHERE id = ? LIMIT 1");
-if ($stmtUser) {
-    $stmtUser->bind_param('i', $userId);
-    $stmtUser->execute();
-    $stmtUser->bind_result($uName, $uEmail, $uPhone);
-    if (!$stmtUser->fetch()) {
-        $uName = '';
-        $uEmail = '';
-        $uPhone = '';
-    }
-    $stmtUser->close();
-} else {
-    $uName = '';
-    $uEmail = '';
-    $uPhone = '';
+$stmt = $mysqli->prepare("
+    SELECT id, name, email, phone
+    FROM users
+    WHERE id = ?
+    LIMIT 1
+");
+$stmt->bind_param('i', $userId);
+$stmt->execute();
+$user = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+if (!$user) {
+    setFlash('error', t('login.error'));
+    redirect('/3d_print_shop/logout.php');
 }
 
-$errors = [];
-$successMessage = '';
-
-$material = '';
-$color = '';
-$layer_height = '';
-$infill = '';
-$weight = '';
-$comment = '';
-
-$estimatedPrice = null;   // то, что сохраняем и показываем
-$layerVal = null;         // числовые значения после валидации
-$infillVal = null;
-$weightVal = null;
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Читаем поля формы
-    $material = $_POST['material'] ?? '';
-    $color = trim($_POST['color'] ?? '');
-    $layer_height = trim($_POST['layer_height'] ?? '');
-    $infill = trim($_POST['infill'] ?? '');
-    $weight = trim($_POST['weight'] ?? '');
-    $comment = trim($_POST['comment'] ?? '');
+    $material = trim((string)($_POST['material'] ?? ''));
+    $color = trim((string)($_POST['color'] ?? ''));
+    $layerHeight = isset($_POST['layer_height']) ? (float)$_POST['layer_height'] : 0.0;
+    $infill = isset($_POST['infill']) ? (int)$_POST['infill'] : 0;
+    $weight = isset($_POST['weight']) ? (float)$_POST['weight'] : 0.0;
+    $comment = trim((string)($_POST['comment'] ?? ''));
 
-    // --- Валидация материала ---
-    if ($material === '') {
-        $errors[] = 'Выберите материал.';
-    } elseif (!in_array($material, $materialsList, true)) {
-        // На всякий случай защищаемся от ручного POST
-        $errors[] = 'Неверное значение материала.';
+    if (!in_array($material, $materialsList, true)) {
+        $errors[] = t('custom.material_error');
     }
 
-    // --- Валидация высоты слоя (если указана) ---
-    if ($layer_height !== '') {
-        $layer_height = str_replace(',', '.', $layer_height);
-        if (!is_numeric($layer_height)) {
-            $errors[] = 'Высота слоя должна быть числом.';
-        } else {
-            $lhVal = (float)$layer_height;
-            if ($lhVal < 0.05 || $lhVal > 1) {
-                $errors[] = 'Высота слоя должна быть в диапазоне 0.05–1 мм.';
-            } else {
-                $layerVal = $lhVal;
-            }
-        }
+    if ($layerHeight <= 0) {
+        $errors[] = t('custom.layer_error');
     }
 
-    // --- Валидация заполняемости (если указана) ---
-    if ($infill !== '') {
-        if (!ctype_digit($infill)) {
-            $errors[] = 'Заполняемость должна быть целым числом от 0 до 100.';
-        } else {
-            $infVal = (int)$infill;
-            if ($infVal < 0 || $infVal > 100) {
-                $errors[] = 'Заполняемость должна быть от 0 до 100%.';
-            } else {
-                $infillVal = $infVal;
-            }
-        }
+    if ($infill < 0 || $infill > 100) {
+        $errors[] = t('custom.infill_error');
     }
 
-    // --- Валидация веса (если указан) ---
-    if ($weight !== '') {
-        $weightClean = str_replace(',', '.', $weight);
-        if (!is_numeric($weightClean)) {
-            $errors[] = 'Вес должен быть числом (в граммах).';
-        } else {
-            $wVal = (float)$weightClean;
-            if ($wVal <= 0 || $wVal > 2000) {
-                $errors[] = 'Вес должен быть в диапазоне 1–2000 г.';
-            } else {
-                $weightVal = $wVal;
-            }
-        }
+    if ($weight <= 0) {
+        $errors[] = t('custom.weight_error');
     }
 
-    // --- Предварительный расчёт цены (если есть вес) ---
-    if ($weightVal !== null && $weightVal > 0) {
-        // Группы материалов с разной ценой за грамм
-        $matLower = mb_strtolower($material, 'UTF-8');
-        $pricePerGram = 0.06; // базовый PLA
+    if (!isset($_FILES['model_file']) || $_FILES['model_file']['error'] !== UPLOAD_ERR_OK) {
+        $errors[] = t('custom.file_required');
+    }
 
-        if (mb_stripos($matLower, 'petg', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.07;
-        } elseif (mb_stripos($matLower, 'abs', 0, 'UTF-8') !== false || mb_stripos($matLower, 'asa', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.08;
-        } elseif (mb_stripos($matLower, 'pc', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.09;
-        } elseif (mb_stripos($matLower, 'paht', 0, 'UTF-8') !== false || mb_stripos($matLower, 'pa-cf', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.11;
-        } elseif (mb_stripos($matLower, 'pa', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.10;
-        } elseif (mb_stripos($matLower, 'tpu', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.09;
-        } elseif (mb_stripos($matLower, 'support', 0, 'UTF-8') !== false) {
-            $pricePerGram = 0.05;
+    if ($material !== '' && $layerHeight > 0 && $weight > 0 && $infill >= 0 && $infill <= 100) {
+        $estimatedPricePreview = calculateCustomOrderPrice($material, $weight, $layerHeight, $infill);
+    }
+
+    if (!$errors) {
+        $allowedExtensions = ['stl', 'obj', 'step', 'stp'];
+
+        $originalFileName = (string)$_FILES['model_file']['name'];
+        $tmpFilePath = (string)$_FILES['model_file']['tmp_name'];
+        $fileSize = (int)$_FILES['model_file']['size'];
+        $fileExtension = strtolower(pathinfo($originalFileName, PATHINFO_EXTENSION));
+
+        if (!in_array($fileExtension, $allowedExtensions, true)) {
+            $errors[] = t('custom.file_types_error');
         }
 
-        // Берём 0.2 мм как "базовую" высоту слоя, если пользователь ничего не указал
-        $layerBase = 0.2;
-        $lh = $layerVal ?? $layerBase;
-
-        // Чем меньше слой, тем дольше печать → дороже
-        $layerFactor = $layerBase / $lh;
-        if ($layerFactor < 0.7) $layerFactor = 0.7;
-        if ($layerFactor > 1.6) $layerFactor = 1.6;
-
-        // Заполнение: по умолчанию 20%, коэффициент от 0.3 до 1.5
-        $infillPercent = $infillVal !== null ? $infillVal : 20;
-        $infillFactor = $infillPercent / 100.0;
-        if ($infillFactor < 0.3) $infillFactor = 0.3;
-        if ($infillFactor > 1.5) $infillFactor = 1.5;
-
-        $baseCost = 3.0; // стартовая стоимость за запуск принтера
-        $estimatedPrice = $baseCost + $weightVal * $pricePerGram * $infillFactor * $layerFactor;
-        $estimatedPrice = round($estimatedPrice, 2);
-    }
-
-    // --- Проверка файла ---
-    $savedPath = null;
-    $fileTmp = null;
-    $ext = null;
-
-    if (!isset($_FILES['model_file']) || $_FILES['model_file']['error'] === UPLOAD_ERR_NO_FILE) {
-        $errors[] = 'Загрузите 3D-файл модели.';
-    } else {
-        $fileError = $_FILES['model_file']['error'];
-
-        if ($fileError !== UPLOAD_ERR_OK) {
-            $errors[] = 'Ошибка загрузки файла.';
-        } else {
-            $fileName = $_FILES['model_file']['name'];
-            $fileTmp  = $_FILES['model_file']['tmp_name'];
-            $fileSize = $_FILES['model_file']['size'];
-
-            // Разрешённые расширения
-            $allowedExtensions = ['stl', 'obj', 'step', 'stp'];
-            $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-
-            if (!in_array($ext, $allowedExtensions, true)) {
-                $errors[] = 'Разрешены файлы только: ' . implode(', ', $allowedExtensions) . '.';
-            }
-
-            // Ограничение размера, например 20 МБ
-            if ($fileSize > 20 * 1024 * 1024) {
-                $errors[] = 'Файл слишком большой (максимум 20 МБ).';
-            }
+        if ($fileSize > 20 * 1024 * 1024) {
+            $errors[] = t('custom.file_size_error');
         }
-    }
 
-    // --- Сохраняем файл, если ошибок нет ---
-    if (empty($errors) && $fileTmp !== null && $ext !== null) {
         $uploadDir = __DIR__ . '/uploads/models/';
+
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0777, true);
         }
-
-        $newFileName = 'model_' . time() . '_' . mt_rand(1000, 9999) . '.' . $ext;
-        $targetPath = $uploadDir . $newFileName;
-
-        if (move_uploaded_file($fileTmp, $targetPath)) {
-            $savedPath = 'uploads/models/' . $newFileName; // относительный путь
-        } else {
-            $errors[] = 'Не удалось сохранить файл на сервере.';
-        }
     }
 
-    // --- Сохраняем запись в БД ---
-    if (empty($errors) && $savedPath !== null) {
-        $stmt = $mysqli->prepare("
-            INSERT INTO custom_orders
-                (user_id, customer_name, customer_email, customer_phone,
-                 material, color, layer_height, infill,
-                 estimated_price, status, model_file, comment)
-            VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)
-        ");
+    if (!$errors) {
+        $newFileName = uniqid('model_', true) . '.' . $fileExtension;
+        $destinationPath = $uploadDir . $newFileName;
 
-        if ($stmt) {
-            $layerDb = $layerVal !== null ? $layerVal : null;
-            $infillDb = $infillVal !== null ? $infillVal : null;
-            $priceDb = $estimatedPrice !== null ? $estimatedPrice : null;
+        if (!move_uploaded_file($tmpFilePath, $destinationPath)) {
+            $errors[] = t('custom.file_save_error');
+        } else {
+            $modelFileForDb = 'uploads/models/' . $newFileName;
+            $estimatedPrice = calculateCustomOrderPrice($material, $weight, $layerHeight, $infill);
+
+            $stmt = $mysqli->prepare("
+                INSERT INTO custom_orders (
+                    user_id,
+                    customer_name,
+                    customer_email,
+                    customer_phone,
+                    material,
+                    color,
+                    layer_height,
+                    infill,
+                    estimated_price,
+                    status,
+                    model_file,
+                    comment
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)
+            ");
 
             $stmt->bind_param(
-                'isssssdidss',
-                $userId,
-                $uName,
-                $uEmail,
-                $uPhone,
-                $material,
-                $color,
-                $layerDb,
-                $infillDb,
-                $priceDb,
-                $savedPath,
-                $comment
+                    'isssssiddss',
+                    $userId,
+                    $user['name'],
+                    $user['email'],
+                    $user['phone'],
+                    $material,
+                    $color,
+                    $layerHeight,
+                    $infill,
+                    $estimatedPrice,
+                    $modelFileForDb,
+                    $comment
             );
 
             if ($stmt->execute()) {
-                $successMessage = 'Заявка на индивидуальный заказ отправлена! Мы свяжемся с вами по e-mail.';
-                if ($estimatedPrice !== null) {
-                    $successMessage .= ' Ориентировочная стоимость печати: ~' .
-                        number_format($estimatedPrice, 2, ',', ' ') . ' €.';
-                }
+                $orderId = $stmt->insert_id;
+                $stmt->close();
 
-                // Очищаем поля формы
-                $material = '';
-                $color = '';
-                $layer_height = '';
-                $infill = '';
-                $weight = '';
-                $comment = '';
+                require_once __DIR__ . '/mail/mailer.php';
+
+                $mailBody = renderMailTemplate('custom_order_created.php', [
+                        'orderId' => $orderId,
+                        'customerName' => $user['name'],
+                        'customerEmail' => $user['email'],
+                        'customerPhone' => $user['phone'],
+                        'material' => $material,
+                        'color' => $color,
+                        'layerHeight' => $layerHeight,
+                        'infill' => $infill,
+                        'weight' => $weight,
+                        'estimatedPrice' => $estimatedPrice,
+                        'modelFile' => $modelFileForDb,
+                        'comment' => $comment,
+                        'createdAt' => date('Y-m-d H:i:s'),
+                ]);
+
+                $absoluteModelPath = __DIR__ . '/' . $modelFileForDb;
+
+                sendMailToAdmin(
+                        'New custom order / Новый индивидуальный заказ #' . $orderId,
+                        $mailBody,
+                        [
+                                [
+                                        'path' => $absoluteModelPath,
+                                        'name' => basename($modelFileForDb),
+                                ]
+                        ]
+                );
+
+                setFlash('success', t('custom.success'));
+                redirect('/3d_print_shop/profile.php');
             } else {
-                $errors[] = 'Ошибка сохранения заявки: ' . htmlspecialchars($stmt->error);
+                $stmt->close();
+                $errors[] = t('custom.save_error');
             }
-
-            $stmt->close();
-        } else {
-            $errors[] = 'Ошибка подготовки запроса: ' . htmlspecialchars($mysqli->error);
         }
     }
 }
+
+require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h2>Индивидуальный заказ</h2>
-
-<p>Здесь вы можете загрузить свой 3D-файл и указать параметры печати. На основе веса модели и выбранных параметров будет показана примерная стоимость.</p>
-
-<?php if (!empty($successMessage)): ?>
-    <div class="message success">
-        <?= htmlspecialchars($successMessage) ?>
+    <div class="page-header">
+        <h1><?= e(t('custom.title')) ?></h1>
+        <p><?= e(t('custom.subtitle')) ?></p>
     </div>
-<?php endif; ?>
 
 <?php if (!empty($errors)): ?>
     <div class="message error">
-        <ul>
-            <?php foreach ($errors as $e): ?>
-                <li><?= htmlspecialchars($e) ?></li>
-            <?php endforeach; ?>
-        </ul>
+        <?php foreach ($errors as $error): ?>
+            <div><?= e($error) ?></div>
+        <?php endforeach; ?>
     </div>
 <?php endif; ?>
 
-<form method="post" action="custom_order.php" enctype="multipart/form-data">
-    <p>
-        <label>Материал (официальные пластики Bambu Lab):<br>
-            <select name="material" required>
-                <option value="">Выберите материал...</option>
-                <?php foreach ($materialsList as $mat): ?>
-                    <option value="<?= htmlspecialchars($mat) ?>"
-                        <?= $material === $mat ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($mat) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-    </p>
+    <div class="calculator-box">
+        <h2><?= e(t('custom.calc.title')) ?></h2>
+        <p class="small-text"><?= e(t('custom.calc.subtitle')) ?></p>
 
-    <p>
-        <label>Цвет (необязательно):<br>
-            <input type="text" name="color" value="<?= htmlspecialchars($color) ?>">
-        </label>
-    </p>
+        <div class="calculator-price" id="pricePreview">
+            €<?= number_format((float)($estimatedPricePreview ?? 0), 2) ?>
+        </div>
+    </div>
 
-    <p>
-        <label>Высота слоя, мм (например, 0.12, 0.20) — необязательно:<br>
-            <input
-                    type="number"
-                    name="layer_height"
-                    value="<?= htmlspecialchars($layer_height) ?>"
-                    step="0.01"
-                    min="0.05"
-                    max="1">
-        </label>
-        <span class="helper-text">По умолчанию берётся 0.20 мм, меньший слой даёт лучшее качество, но дольше печать.</span>
-    </p>
+    <form method="post" enctype="multipart/form-data" id="customOrderForm">
+        <label for="material"><?= e(t('common.material')) ?></label>
+        <select id="material" name="material" required>
+            <option value=""><?= e(t('common.material')) ?></option>
+            <?php foreach ($materialsList as $materialOption): ?>
+                <option value="<?= e($materialOption) ?>" <?= old('material') === $materialOption ? 'selected' : '' ?>>
+                    <?= e($materialOption) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
 
-    <p>
-        <label>Заполняемость, % (например, 15, 20, 100) — необязательно:<br>
-            <input
-                    type="number"
-                    name="infill"
-                    value="<?= htmlspecialchars($infill) ?>"
-                    min="0"
-                    max="100">
-        </label>
-        <span class="helper-text">По умолчанию считается как 20% заполнения.</span>
-    </p>
+        <label for="color"><?= e(t('common.color')) ?></label>
+        <input
+                type="text"
+                id="color"
+                name="color"
+                value="<?= e(old('color')) ?>"
+                placeholder="<?= e(t('custom.color_placeholder')) ?>"
+        >
 
-    <p>
-        <label>Ориентировочный вес модели, грамм (желательно для расчёта цены):<br>
-            <input
-                    type="number"
-                    name="weight"
-                    value="<?= htmlspecialchars($weight) ?>"
-                    min="1"
-                    max="2000"
-                    step="1">
-        </label>
-        <span class="helper-text">Можно посмотреть вес в слайсере перед отправкой на печать.</span>
-    </p>
+        <label for="layer_height"><?= e(t('common.layer_height')) ?> (мм)</label>
+        <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                id="layer_height"
+                name="layer_height"
+                value="<?= e(old('layer_height', '0.20')) ?>"
+                required
+        >
 
-    <p>
-        <label>3D-файл модели (STL, OBJ, STEP):<br>
-            <input type="file" name="model_file" required accept=".stl,.obj,.step,.stp">
-        </label>
-    </p>
+        <label for="infill"><?= e(t('common.infill')) ?> (%)</label>
+        <input
+                type="number"
+                min="0"
+                max="100"
+                id="infill"
+                name="infill"
+                value="<?= e(old('infill', '20')) ?>"
+                required
+        >
 
-    <p>
-        <label>Комментарий (опишите задачу, желаемое качество, размер и т.д.):<br>
-            <textarea name="comment" rows="4" cols="50"><?= htmlspecialchars($comment) ?></textarea>
-        </label>
-    </p>
+        <label for="weight"><?= e(t('common.weight')) ?> (г)</label>
+        <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                id="weight"
+                name="weight"
+                value="<?= e(old('weight', '50')) ?>"
+                required
+        >
 
-    <p class="helper-text">
-        Примерная стоимость печати: <strong><span id="price-preview">
-            <?php
-            if ($estimatedPrice !== null && $weightVal !== null && $weightVal > 0) {
-                echo htmlspecialchars(number_format($estimatedPrice, 2, ',', ' ') . ' €');
-            } else {
-                echo '—';
+        <label for="model_file"><?= e(t('custom.file_label')) ?></label>
+        <input
+                type="file"
+                id="model_file"
+                name="model_file"
+                accept=".stl,.obj,.step,.stp"
+                required
+        >
+
+        <label for="comment"><?= e(t('common.comment')) ?></label>
+        <textarea id="comment" name="comment"><?= e(old('comment')) ?></textarea>
+
+        <button type="submit"><?= e(t('custom.send')) ?></button>
+    </form>
+
+    <script>
+        (function () {
+            const materialSelect = document.getElementById('material');
+            const layerHeightInput = document.getElementById('layer_height');
+            const infillInput = document.getElementById('infill');
+            const weightInput = document.getElementById('weight');
+            const pricePreview = document.getElementById('pricePreview');
+
+            const materialRates = {
+                'Bambu PLA Basic': 0.35,
+                'Bambu PLA Matte': 0.37,
+                'Bambu PLA Tough': 0.42,
+                'Bambu PLA Silk': 0.40,
+                'Bambu PLA Silk+': 0.43,
+                'Bambu PLA Galaxy': 0.41,
+                'Bambu PLA Marble': 0.43,
+                'Bambu PLA Translucent': 0.39,
+                'Bambu PLA Dynamic': 0.40,
+                'Bambu PLA Glow': 0.50,
+                'Bambu PLA Metal': 0.48,
+                'Bambu PLA Wood': 0.46,
+                'Bambu PLA-CF': 0.55,
+                'Bambu PETG Basic': 0.40,
+                'Bambu PETG Translucent': 0.42,
+                'Bambu PETG HF': 0.45,
+                'Bambu PETG-CF': 0.58,
+                'Bambu ABS': 0.44,
+                'Bambu ASA': 0.46,
+                'Bambu PC': 0.60,
+                'Bambu PA (Nylon)': 0.62,
+                'Bambu PA-CF': 0.70,
+                'Bambu PAHT-CF': 0.78,
+                'Bambu TPU 95A': 0.52,
+                'Bambu Support G': 0.65,
+                'Bambu Support W': 0.68,
+                'Другое (указать в комментарии)': 0.50
+            };
+
+            function calculatePrice() {
+                const material = materialSelect.value;
+                const layerHeight = parseFloat(layerHeightInput.value) || 0;
+                const infill = parseInt(infillInput.value) || 0;
+                const weight = parseFloat(weightInput.value) || 0;
+
+                if (!material || layerHeight <= 0 || infill < 0 || infill > 100 || weight <= 0) {
+                    pricePreview.textContent = '€0.00';
+                    return;
+                }
+
+                const basePrice = 3.00;
+                const ratePerGram = materialRates[material] || 0.50;
+
+                let layerCoefficient = 1.0;
+
+                if (layerHeight <= 0.12) {
+                    layerCoefficient = 1.35;
+                } else if (layerHeight <= 0.16) {
+                    layerCoefficient = 1.20;
+                } else if (layerHeight <= 0.20) {
+                    layerCoefficient = 1.10;
+                } else if (layerHeight <= 0.28) {
+                    layerCoefficient = 1.00;
+                } else {
+                    layerCoefficient = 0.95;
+                }
+
+                const infillCoefficient = 1.0 + (infill / 200);
+                const price = (basePrice + (weight * ratePerGram)) * layerCoefficient * infillCoefficient;
+
+                pricePreview.textContent = '€' + price.toFixed(2);
             }
-            ?>
-        </span></strong>
-    </p>
 
-    <p>
-        <button type="submit">Отправить заявку</button>
-    </p>
-</form>
+            materialSelect.addEventListener('change', calculatePrice);
+            layerHeightInput.addEventListener('input', calculatePrice);
+            infillInput.addEventListener('input', calculatePrice);
+            weightInput.addEventListener('input', calculatePrice);
 
-<script>
-    // Небольшой JS-калькулятор для предварительной цены на странице
-    (function() {
-        const materialEl = document.querySelector('select[name="material"]');
-        const layerEl = document.querySelector('input[name="layer_height"]');
-        const infillEl = document.querySelector('input[name="infill"]');
-        const weightEl = document.querySelector('input[name="weight"]');
-        const outputEl = document.getElementById('price-preview');
-
-        if (!materialEl || !outputEl) return;
-
-        function pricePerGram(material) {
-            material = (material || '').toLowerCase();
-            if (material.includes('petg')) return 0.07;
-            if (material.includes('abs') || material.includes('asa')) return 0.08;
-            if (material.includes('pc')) return 0.09;
-            if (material.includes('paht') || material.includes('pa-cf')) return 0.11;
-            if (material.includes('pa ')) return 0.10;
-            if (material.includes('tpu')) return 0.09;
-            if (material.includes('support')) return 0.05;
-            return 0.06; // PLA и похожие
-        }
-
-        function updatePrice() {
-            const weightVal = parseFloat((weightEl && weightEl.value || '').replace(',', '.')) || 0;
-            if (!weightVal || weightVal <= 0) {
-                outputEl.textContent = '—';
-                return;
-            }
-
-            const material = materialEl.value;
-            const lh = parseFloat((layerEl && layerEl.value || '').replace(',', '.')) || 0.2;
-            const inf = parseInt(infillEl && infillEl.value, 10);
-            const infillPercent = !isNaN(inf) ? inf : 20;
-
-            const baseCost = 3.0;
-            const ppGram = pricePerGram(material);
-
-            let layerFactor = 0.2 / lh;
-            if (layerFactor < 0.7) layerFactor = 0.7;
-            if (layerFactor > 1.6) layerFactor = 1.6;
-
-            let infillFactor = infillPercent / 100.0;
-            if (infillFactor < 0.3) infillFactor = 0.3;
-            if (infillFactor > 1.5) infillFactor = 1.5;
-
-            const price = baseCost + weightVal * ppGram * infillFactor * layerFactor;
-            outputEl.textContent = price.toFixed(2) + ' €';
-        }
-
-        ['change','input'].forEach(ev => {
-            materialEl.addEventListener(ev, updatePrice);
-            if (layerEl) layerEl.addEventListener(ev, updatePrice);
-            if (infillEl) infillEl.addEventListener(ev, updatePrice);
-            if (weightEl) weightEl.addEventListener(ev, updatePrice);
-        });
-
-        updatePrice();
-    })();
-</script>
+            calculatePrice();
+        })();
+    </script>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
-?>
