@@ -1,0 +1,72 @@
+.admin-inline-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+    border-radius: 0;
+    margin: 0;
+    border: none;
+}
+
+.admin-inline-form select,
+.admin-inline-form input {
+    margin-bottom: 0;
+    min-width: 140px;
+}
+
+.admin-comment-preview {
+    max-width: 240px;
+    color: var(--text-soft);
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.45;
+}
+
+.admin-message-box {
+    max-width: 320px;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.55;
+    color: var(--text-soft);
+}
+
+.action-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin-left: 6px;
+    font-size: 16px;
+    text-decoration: none;
+    border-radius: 12px;
+    transition: 0.22s ease;
+    opacity: 0.95;
+}
+
+.action-icon:hover {
+    opacity: 1;
+    transform: translateY(-2px);
+}
+
+.action-icon.edit {
+    color: #bae6fd;
+    background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+}
+
+.action-icon.edit:hover {
+    background: rgba(56, 189, 248, 0.22);
+}
+
+.action-icon.delete {
+    color: #fecdd3;
+    background: rgba(251, 113, 133, 0.14);
+    border: 1px solid rgba(251, 113, 133, 0.22);
+}
+
+.action-icon.delete:hover {
+    background: rgba(251, 113, 133, 0.22);
+}

@@ -1,0 +1,14 @@
+.calculator-box {
+    background:
+            radial-gradient(circle at top right, rgba(56, 189, 248, 0.18), transparent 180px),
+            linear-gradient(135deg, rgba(30, 41, 70, 0.9), rgba(15, 23, 42, 0.92));
+    border-radius: 24px;
+    padding: 28px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border);
+}
+
+.calculator-box h2 {
+    margin-bottom: 10px;
+}

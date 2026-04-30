@@ -1,0 +1,7 @@
+.product-image-preview {
+    width: 220px;
+    max-width: 100%;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+}

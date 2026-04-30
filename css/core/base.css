@@ -1,0 +1,55 @@
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background:
+            radial-gradient(circle at 15% 5%, rgba(124, 58, 237, 0.28), transparent 360px),
+            radial-gradient(circle at 90% 10%, rgba(56, 189, 248, 0.18), transparent 360px),
+            radial-gradient(circle at 50% 100%, rgba(34, 197, 94, 0.08), transparent 420px),
+            linear-gradient(180deg, #090e1c 0%, #0b1020 45%, #080c18 100%);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+img {
+    max-width: 100%;
+    display: block;
+}
+
+a {
+    color: #93c5fd;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    margin-top: 0;
+    color: var(--text);
+    line-height: 1.18;
+    letter-spacing: -0.025em;
+}
+
+p {
+    line-height: 1.65;
+    color: var(--text-soft);
+}
+
+ul.clean-list {
+    padding-left: 20px;
+    margin: 0;
+    color: var(--text-soft);
+}

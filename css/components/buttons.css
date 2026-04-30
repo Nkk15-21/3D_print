@@ -1,0 +1,52 @@
+button,
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border: none;
+    border-radius: 13px;
+    background: linear-gradient(135deg, var(--primary), #2563eb);
+    color: #ffffff;
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 900;
+    transition: 0.22s ease;
+    box-shadow: 0 12px 26px rgba(124, 58, 237, 0.28);
+}
+
+button:hover,
+.btn:hover {
+    background: linear-gradient(135deg, var(--primary-hover), var(--primary-2));
+    color: #ffffff;
+    transform: translateY(-2px);
+    box-shadow: 0 16px 34px rgba(56, 189, 248, 0.18);
+}
+
+button:active,
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn-secondary {
+    background: rgba(148, 163, 184, 0.16);
+    border: 1px solid var(--border);
+    color: var(--text);
+    box-shadow: none;
+}
+
+.btn-secondary:hover {
+    background: rgba(56, 189, 248, 0.16);
+    border-color: rgba(56, 189, 248, 0.28);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #e11d48, #fb7185);
+    box-shadow: 0 12px 26px rgba(225, 29, 72, 0.24);
+}
+
+.btn-danger:hover {
+    background: linear-gradient(135deg, #be123c, #f43f5e);
+}
